@@ -1,14 +1,14 @@
 import os
 from datetime import datetime
 from database.repository import DatabaseManager
-from model.News import News
+from models.News import News
 
 
 def runDatabaseTest():
     print("Database test started...\n")
 
 
-    BASE_DIR = os.path.dirname(_file_)
+    BASE_DIR = os.path.dirname(__file__)
     db_path = os.path.join(BASE_DIR, "test_news.db")
 
     db = DatabaseManager(db_path)
@@ -57,5 +57,5 @@ def runDatabaseTest():
     print("\nDatabase test finished.")
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     runDatabaseTest()

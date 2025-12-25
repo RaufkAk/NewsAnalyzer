@@ -7,11 +7,11 @@ from typing import List, Dict, Optional
 
 
 class DatabaseManager:
-    def _init_(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None):
         if db_path:
             self.db_path = db_path
         else:
-            self.db_path = os.path.join(os.path.dirname(_file_), "news.db")
+            self.db_path = os.path.join(os.path.dirname(__file__), "news.db")
 
         self.initializeDatabase()
 
