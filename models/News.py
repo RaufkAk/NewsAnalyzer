@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
 
 
 @dataclass
@@ -10,7 +11,7 @@ class News:
     source: str
     sentiment: float
     date: datetime = field(default_factory=datetime.now)
-    sentiment_type: str | None = None
+    sentiment_type: Optional[str] = None
 
     def sentimentCategorizer(self) -> None:
 
