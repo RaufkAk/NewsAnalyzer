@@ -52,12 +52,21 @@ class DatabaseManager:
         with self.dbConnection() as conn:
             cursor = conn.cursor()
 
+            # URL bazlı duplicate kontrolü
             if data.get("url"):
                 cursor.execute(
                     "SELECT id FROM articles WHERE url = ?", (data["url"],)
                 )
                 if cursor.fetchone():
                     return None
+            
+            # Başlık bazlı duplicate kontrolü (URL yoksa veya benzer başlıklar için)
+            cursor.execute(
+                "SELECT id FROM articles WHERE title = ? AND source = ?",
+                (data["title"], data["source"])
+            )
+            if cursor.fetchone():
+                return None
 
             cursor.execute("""
                 INSERT INTO articles (title, url, source, sentiment, date)

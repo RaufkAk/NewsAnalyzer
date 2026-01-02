@@ -79,7 +79,7 @@ st.sidebar.markdown("### 🔄 Veri Toplama")
 
 if st.sidebar.button("🚀 YENİ HABERLER ÇEK", use_container_width=True, type="primary"):
     with st.spinner("Haberler çekiliyor..."):
-        articles = scraper.scrape_all()
+        articles = scraper.scrape_all(db_manager=db)
         result = db.dbInsertArticlesBulk(articles)
 
         st.sidebar.success(f"""

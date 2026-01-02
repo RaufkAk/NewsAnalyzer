@@ -5,6 +5,7 @@ from datetime import datetime
 from textblob import TextBlob
 from typing import List
 import logging
+import random
 from models.News import News
 
 # Logging ayarla
@@ -73,6 +74,7 @@ class NewsScraper:
         category = self.get_next_category('bbc')
         url = f"https://www.bbc.com/news/{category}"
         articles = []
+        seen_titles = set()
         try:
             logger.info(f"BBC'den '{category}' kategorisinden haberler çekiliyor...")
             response = requests.get(url, headers=self.headers, timeout=15)
@@ -85,6 +87,12 @@ class NewsScraper:
                 title = tag.get_text(strip=True)
                 if len(title) < 20 or len(title) > 200:
                     continue
+                
+                # Duplicate kontrolü
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                
                 sentiment = TextBlob(title).sentiment.polarity
                 link_tag = tag.find_parent('a')
                 url_path = ''
@@ -114,6 +122,7 @@ class NewsScraper:
     def scrape_cnn(self) -> List[News]:
         """CNN'den haber çek"""
         articles = []
+        seen_titles = set()
         try:
             logger.info("CNN'den haberler çekiliyor...")
             url = "https://edition.cnn.com/world"
@@ -131,6 +140,11 @@ class NewsScraper:
 
                 if len(title) < 20:
                     continue
+                
+                # Duplicate kontrolü
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
 
                 sentiment = TextBlob(title).sentiment.polarity
 
@@ -167,6 +181,7 @@ class NewsScraper:
     def scrape_aljazeera(self) -> List[News]:
         """Al Jazeera'dan haber çek"""
         articles = []
+        seen_titles = set()
         try:
             logger.info("Al Jazeera'dan haberler çekiliyor...")
             url = "https://www.aljazeera.com/"
@@ -188,6 +203,11 @@ class NewsScraper:
                 # Navigation filtrele
                 if any(skip in title.lower() for skip in ['skip to', 'home page', 'search', 'menu']):
                     continue
+                
+                # Duplicate kontrolü
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
 
                 sentiment = TextBlob(title).sentiment.polarity
 
@@ -222,9 +242,10 @@ class NewsScraper:
     def scrape_npr(self) -> List[News]:
         """NPR'den haber çek"""
         articles = []
+        seen_titles = set()
         try:
             logger.info("NPR'den haberler çekiliyor...")
-            url = "https://www.npr.org/sections/world/"
+            url = "https://www.npr.org/sections/news/"
             response = requests.get(url, headers=self.headers, timeout=15)
 
             if response.status_code != 200:
@@ -232,24 +253,33 @@ class NewsScraper:
                 return articles
 
             soup = BeautifulSoup(response.content, 'html.parser')
-            article_links = soup.find_all('a', {'href': lambda x: x and '/article/' in x})
+            
+            # NPR'ın yeni yapısına göre başlıkları bul
+            headlines = soup.find_all('h2', class_='title')
+            
+            if not headlines:
+                # Alternatif selectors
+                headlines = soup.find_all('h3', class_='title')
+            
+            if not headlines:
+                # Tüm h2'leri dene
+                headlines = soup.find_all('h2', limit=50)
 
-            if not article_links:
-                article_links = soup.find_all('h2', limit=60)
-
-            for item in article_links[:50]:
+            for item in headlines[:50]:
                 try:
-                    if item.name == 'a':
-                        title_elem = item.find(['h2', 'h3', 'span'])
-                        title = title_elem.get_text(strip=True) if title_elem else item.get_text(strip=True)
-                        url_path = item.get('href', '')
-                    else:
-                        title = item.get_text(strip=True)
-                        link = item.find_parent('a')
-                        url_path = link.get('href', '') if link else ''
+                    title = item.get_text(strip=True)
+                    
+                    # Parent link'i bul
+                    link = item.find_parent('a') or item.find('a')
+                    url_path = link.get('href', '') if link else ''
 
                     if len(title) < 15 or len(title) > 250:
                         continue
+                    
+                    # Duplicate kontrolü
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
 
                     sentiment = TextBlob(title).sentiment.polarity
 
@@ -281,10 +311,13 @@ class NewsScraper:
 
         return articles
 
-    def scrape_all(self) -> List[News]:
+    def scrape_all(self, db_manager=None) -> List[News]:
         """
         Tüm kaynaklardan paralel olarak haber çek
         Threading kullanarak performansı artırır
+        
+        Args:
+            db_manager: Database manager instance (duplicate kontrolü için)
 
         Returns:
             List[News]: Toplanan tüm haberler (News nesneleri)
@@ -299,23 +332,75 @@ class NewsScraper:
             self.scrape_npr
         ]
 
-        all_articles: List[News] = []
+        all_articles_by_source = []
 
         # ThreadPoolExecutor ile paralel çalıştır
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Tüm fonksiyonları submit et
             futures = [executor.submit(func) for func in scraping_functions]
 
-            # Sonuçları topla
+            # Sonuçları kaynak bazında topla
             for future in futures:
                 try:
                     articles = future.result(timeout=30)
-                    all_articles.extend(articles)
+                    if articles:
+                        all_articles_by_source.append(articles)
                 except Exception as e:
                     logger.error(f"Thread hatası: {e}")
 
-        # Maksimum 30 haber döndür
-        if len(all_articles) > 30:
-            all_articles = all_articles[:30]
-        logger.info(f"Toplam {len(all_articles)} haber çekildi (max 30)")
-        return all_articles
+        # Bugün database'de olan başlıkları al (duplicate kontrolü için)
+        existing_titles = set()
+        if db_manager:
+            try:
+                from datetime import date
+                today = date.today()
+                all_db_articles = db_manager.dbGetAllArticles(limit=10000)
+                if not all_db_articles.empty:
+                    # Bugünkü haberleri filtrele
+                    today_articles = all_db_articles[
+                        all_db_articles['date'].dt.date == today
+                    ]
+                    existing_titles = set(today_articles['title'].tolist())
+                    logger.info(f"Bugün database'de {len(existing_titles)} haber var")
+            except Exception as e:
+                logger.warning(f"Database kontrolü yapılamadı: {e}")
+
+        # Her kaynaktan yeni (duplicate olmayan) haberleri filtrele
+        filtered_by_source = []
+        for source_articles in all_articles_by_source:
+            new_articles = [
+                article for article in source_articles 
+                if article.title not in existing_titles
+            ]
+            if new_articles:
+                filtered_by_source.append(new_articles)
+                logger.info(f"{source_articles[0].source}: {len(new_articles)} yeni haber")
+            else:
+                # Hiç yeni haber yoksa, orijinalden en az 1 tane al
+                filtered_by_source.append(source_articles[:1])
+                logger.info(f"{source_articles[0].source}: Yeni haber yok, 1 tane alındı")
+
+        # Önce her kaynaktan en az 1 haber garantisi
+        selected_articles: List[News] = []
+        max_per_batch = 30
+        
+        # Her kaynaktan ilk haberi al
+        for source_articles in filtered_by_source:
+            if source_articles and len(selected_articles) < max_per_batch:
+                selected_articles.append(source_articles[0])
+        
+        # Geri kalan haberleri round-robin ile ekle
+        max_length = max(len(articles) for articles in filtered_by_source) if filtered_by_source else 0
+        for i in range(1, max_length):  # 1'den başla çünkü 0. index zaten alındı
+            for source_articles in filtered_by_source:
+                if i < len(source_articles) and len(selected_articles) < max_per_batch:
+                    selected_articles.append(source_articles[i])
+        
+        # Biraz karıştır ama her kaynaktan en az 1 haber garantisini koru
+        guaranteed = selected_articles[:len(filtered_by_source)]
+        rest = selected_articles[len(filtered_by_source):]
+        random.shuffle(rest)
+        selected_articles = guaranteed + rest
+        
+        logger.info(f"Toplam {len(selected_articles)} haber seçildi (her kaynaktan min 1)")
+        return selected_articles
