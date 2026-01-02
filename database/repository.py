@@ -72,15 +72,18 @@ class DatabaseManager:
 
             return cursor.lastrowid
 
+
     def dbInsertArticlesBulk(self, articles: List) -> Dict[str, int]:
         result = {"saved": 0, "duplicate": 0}
-
+        from sqlite3 import IntegrityError
         for article in articles:
-            if self.dbInsertArticle(article):
-                result["saved"] += 1
-            else:
+            try:
+                if self.dbInsertArticle(article):
+                    result["saved"] += 1
+                else:
+                    result["duplicate"] += 1
+            except IntegrityError:
                 result["duplicate"] += 1
-
         return result
 
     # ---------------- SELECT ----------------

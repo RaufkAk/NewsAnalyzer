@@ -12,45 +12,80 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+
 class NewsScraper:
     """Haber sitelerinden veri toplayan ana sınıf"""
 
+    # Her kaynak için kategoriler
+    BBC_CATEGORIES = [
+        "world", "business", "technology", "health", "science_and_environment"
+    ]
+    CNN_CATEGORIES = [
+        "world", "business", "africa", "asia", "europe", "middle-east", "us", "americas"
+    ]
+    ALJAZEERA_CATEGORIES = [
+        "news", "economy", "opinion", "human-rights", "science-and-technology"
+    ]
+    NPR_CATEGORIES = [
+        "world", "business", "science", "technology", "health"
+    ]
+
+    # Her kaynak için kategori indexi (Streamlit session_state ile tutulabilir)
+    category_indices = {
+        'bbc': 0,
+        'cnn': 0,
+        'aljazeera': 0,
+        'npr': 0
+    }
+
     def __init__(self, max_workers=4):
-        """
-        Args:
-            max_workers (int): Paralel çalışacak thread sayısı
-        """
         self.max_workers = max_workers
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
 
+    def get_next_category(self, source):
+        # Sıradaki kategoriyi döndür ve indexi güncelle
+        if source == 'bbc':
+            idx = NewsScraper.category_indices['bbc']
+            cat = NewsScraper.BBC_CATEGORIES[idx]
+            NewsScraper.category_indices['bbc'] = (idx + 1) % len(NewsScraper.BBC_CATEGORIES)
+            return cat
+        elif source == 'cnn':
+            idx = NewsScraper.category_indices['cnn']
+            cat = NewsScraper.CNN_CATEGORIES[idx]
+            NewsScraper.category_indices['cnn'] = (idx + 1) % len(NewsScraper.CNN_CATEGORIES)
+            return cat
+        elif source == 'aljazeera':
+            idx = NewsScraper.category_indices['aljazeera']
+            cat = NewsScraper.ALJAZEERA_CATEGORIES[idx]
+            NewsScraper.category_indices['aljazeera'] = (idx + 1) % len(NewsScraper.ALJAZEERA_CATEGORIES)
+            return cat
+        elif source == 'npr':
+            idx = NewsScraper.category_indices['npr']
+            cat = NewsScraper.NPR_CATEGORIES[idx]
+            NewsScraper.category_indices['npr'] = (idx + 1) % len(NewsScraper.NPR_CATEGORIES)
+            return cat
+        return None
+
     def scrape_bbc(self) -> List[News]:
-        """BBC News'den haber çek"""
+        """BBC News'den kategori bazlı haber çek"""
+        category = self.get_next_category('bbc')
+        url = f"https://www.bbc.com/news/{category}"
         articles = []
         try:
-            logger.info("BBC'den haberler çekiliyor...")
-            url = "https://www.bbc.com/news"
+            logger.info(f"BBC'den '{category}' kategorisinden haberler çekiliyor...")
             response = requests.get(url, headers=self.headers, timeout=15)
-
             if response.status_code != 200:
                 logger.warning(f"BBC yanıt vermiyor: {response.status_code}")
                 return articles
-
             soup = BeautifulSoup(response.content, 'html.parser')
             headline_tags = soup.find_all(['h2', 'h3'], limit=150)
-
             for tag in headline_tags:
                 title = tag.get_text(strip=True)
-
-                # Filtreleme
                 if len(title) < 20 or len(title) > 200:
                     continue
-
-                # Sentiment analizi
                 sentiment = TextBlob(title).sentiment.polarity
-
-                # URL bul
                 link_tag = tag.find_parent('a')
                 url_path = ''
                 if link_tag and link_tag.get('href'):
@@ -59,8 +94,6 @@ class NewsScraper:
                         url_path = href
                     elif href.startswith('/'):
                         url_path = 'https://www.bbc.com' + href
-
-                # News dataclass oluştur
                 try:
                     article = News(
                         title=title,
@@ -73,12 +106,9 @@ class NewsScraper:
                 except ValueError as e:
                     logger.warning(f"BBC article validation hatası: {e}")
                     continue
-
-            logger.info(f"BBC: {len(articles)} haber çekildi")
-
+            logger.info(f"BBC: {len(articles)} haber çekildi ({category})")
         except Exception as e:
             logger.error(f"BBC hatası: {e}")
-
         return articles
 
     def scrape_cnn(self) -> List[News]:
@@ -284,5 +314,8 @@ class NewsScraper:
                 except Exception as e:
                     logger.error(f"Thread hatası: {e}")
 
-        logger.info(f"Toplam {len(all_articles)} haber çekildi")
+        # Maksimum 30 haber döndür
+        if len(all_articles) > 30:
+            all_articles = all_articles[:30]
+        logger.info(f"Toplam {len(all_articles)} haber çekildi (max 30)")
         return all_articles
