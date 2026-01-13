@@ -3,6 +3,7 @@ from datetime import datetime
 from database.repository import DatabaseManager
 from models.News import News
 
+##python -m database.tests.database_test
 
 def runDatabaseTest():
     print("Database test started...\n")

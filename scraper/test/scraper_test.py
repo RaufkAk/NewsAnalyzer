@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from scraper.manager import NewsScraper
 
+##python -m scraper.test.scraper_test
 
 class TestNewsScraper(unittest.TestCase):
     """NewsScraper için temel testler"""

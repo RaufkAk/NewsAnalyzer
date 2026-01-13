@@ -1,12 +1,16 @@
 import pandas as pd
 from analyzer.sentiment import NewsAnalyzer
 
+
+##cd /Users/raufkutayakyildiz/Desktop/NewsAnalyzerr
+##python -m analyzer.tests.test_analyzer
+
 def run_tests():
     analyzer = NewsAnalyzer()
 
-    print("=" * 50)
+    
     print("NEWS ANALYZER TESTS")
-    print("=" * 50)
+
 
     # --- Sentiment testi ---
     texts = [

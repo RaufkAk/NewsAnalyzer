@@ -15,79 +15,111 @@ class DashboardUI:
             </div>
         """, unsafe_allow_html=True)
 
-    def render_metrics(self, df: pd.DataFrame):
-        if df.empty:
+    def render_metrics(self, stats: Dict, recent_count: int = 0):
+        if not stats:
             return
 
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            today_count = len(df[df['date'] > datetime.now() - timedelta(days=1)])
             st.metric(
-                label="📰 Toplam Haber",
-                value=len(df),
-                delta=f"+{today_count} (bugün)" if today_count > 0 else None
+                label=" Toplam Haber",
+                value=stats.get('total_articles', 0),
+                delta=f"+{recent_count} (son 24s)" if recent_count > 0 else None
             )
 
         with col2:
-            avg_sentiment = df['sentiment'].mean()
+            avg_sentiment = stats.get('avg_sentiment', 0)
             st.metric(
-                label="😊 Ortalama Duygu",
+                label=" Ortalama Duygu",
                 value=f"{avg_sentiment:.3f}",
                 delta="Pozitif ↑" if avg_sentiment > 0 else "Negatif ↓"
             )
 
         with col3:
-            positive_count = (df['sentiment_label'] == 'Positive').sum()
-            positive_pct = positive_count / len(df) * 100 if len(df) > 0 else 0
+            positive_pct = stats.get('positive_pct', 0)
+            # Calculate count from percentage for display if needed, or just show percentage
+            # stats doesn't have positive_count explicitly but has distribution
+            pos_count = stats.get('sentiment_distribution', {}).get('Positive', 0)
+            
             st.metric(
-                label="✅ Pozitif Oran",
+                label=" Pozitif Oran",
                 value=f"{positive_pct:.1f}%",
-                delta=f"{positive_count} haber"
+                delta=f"{pos_count} haber"
             )
 
         with col4:
-            sources_count = df['source'].nunique()
+            sources_count = stats.get('sources_count', 0)
+            total = stats.get('total_articles', 1)
+            # Avoid division by zero
+            avg_per_source = total // sources_count if sources_count > 0 else 0
+            
             st.metric(
-                label="📡 Kaynak Sayısı",
+                label="Kaynak Sayısı",
                 value=sources_count,
-                delta=f"{len(df) // max(sources_count, 1)} avg/kaynak"
+                delta=f"{avg_per_source} avg/kaynak"
             )
 
-    def plot_sentiment_pie(self, df: pd.DataFrame):
-        if df.empty:
+    def plot_sentiment_pie(self, distribution: Dict):
+        if not distribution:
             st.warning("Veri yok")
             return
 
-        order = ['Positive', 'Neutral', 'Negative']
-        labels_tr = ['Pozitif', 'Nötr', 'Negatif']
-        values = [(df['sentiment_label'] == k).sum() for k in order]
-        colors = ['#2ecc71', '#95a5a6', '#e74c3c']
+        labels_map = {'Positive': 'Pozitif', 'Neutral': 'Nötr', 'Negative': 'Negatif'}
+        labels = [labels_map.get(k, k) for k in distribution.keys()]
+        values = list(distribution.values())
+        colors = ['#2ecc71', '#95a5a6', '#e74c3c'] 
+        
+        # Ensure order matches colors: Positive, Neutral, Negative
+        # Re-order dict if necessary
+        ordered_keys = ['Positive', 'Neutral', 'Negative']
+        ordered_values = [distribution.get(k, 0) for k in ordered_keys]
+        ordered_labels = ['Pozitif', 'Nötr', 'Negatif']
 
         fig = go.Figure(data=[go.Pie(
-            labels=labels_tr,
-            values=values,
+            labels=ordered_labels,
+            values=ordered_values,
             hole=0.4,
             marker_colors=colors
         )])
-        fig.update_layout(height=400, title="🎭 Duygu Dağılımı")
+        fig.update_layout(height=400, title=" Duygu Dağılımı")
         st.plotly_chart(fig, use_container_width=True)
 
-    def plot_source_distribution(self, df: pd.DataFrame):
-        if df.empty:
+    def plot_source_distribution(self, source_stats: pd.DataFrame):
+        """
+        Expects a DataFrame with 'source' and 'sentiment_count' columns
+        (output of analyzer.sentiment_by_source)
+        """
+        if source_stats.empty:
             st.warning("Veri yok")
             return
-
-        source_counts = df['source'].value_counts()
+            
+        # If columns are flattened like source, sentiment_mean, sentiment_count
+        if 'sentiment_count' in source_stats.columns:
+            x_col = 'source'
+            y_col = 'sentiment_count'
+            color_col = 'sentiment_count' 
+        else:
+            # Fallback for raw DF just in case (though we aim to avoid this)
+            if 'source' in source_stats.columns:
+                 counts = source_stats['source'].value_counts().reset_index()
+                 counts.columns = ['source', 'count']
+                 source_stats = counts
+                 x_col = 'source'
+                 y_col = 'count'
+                 color_col = 'count'
+            else:
+                return
 
         fig = px.bar(
-            x=source_counts.index,
-            y=source_counts.values,
-            labels={'x': 'Kaynak', 'y': 'Haber Sayısı'},
-            color=source_counts.values,
+            source_stats,
+            x=x_col,
+            y=y_col,
+            labels={'source': 'Kaynak', 'sentiment_count': 'Haber Sayısı', 'count': 'Haber Sayısı'},
+            color=color_col,
             color_continuous_scale='Blues'
         )
-        fig.update_layout(height=400, showlegend=False, title="📡 Kaynak Bazında Haber Sayısı")
+        fig.update_layout(height=400, showlegend=False, title=" Kaynak Bazında Haber Sayısı")
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_source_sentiment_grouped(self, df: pd.DataFrame):
@@ -108,34 +140,31 @@ class DashboardUI:
             color_discrete_map={'Pozitif': '#2ecc71', 'Nötr': '#95a5a6', 'Negatif': '#e74c3c'},
             labels={'count': 'Haber Sayısı', 'source': 'Kaynak', 'sentiment_label_tr': 'Duygu'}
         )
-        fig.update_layout(height=400, title="📊 Kaynak Bazında Duygu Analizi")
+        fig.update_layout(height=400, title=" Kaynak Bazında Duygu Analizi")
         st.plotly_chart(fig, use_container_width=True)
 
-    def plot_sentiment_timeline(self, df: pd.DataFrame):
-        if df.empty or 'date' not in df.columns:
+    def plot_sentiment_timeline(self, timeline_df: pd.DataFrame):
+        """
+        Expects DataFrame with 'day', 'avg_sentiment', 'count'
+        (output of analyzer.sentiment_over_time)
+        """
+        if timeline_df.empty:
             st.warning("Veri yok")
             return
-
-        df['day'] = df['date'].dt.date
-        daily_sentiment = df.groupby('day').agg({
-            'sentiment': 'mean',
-            'id': 'count'
-        }).reset_index()
-        daily_sentiment.columns = ['day', 'avg_sentiment', 'count']
 
         fig = go.Figure()
 
         fig.add_trace(go.Scatter(
-            x=daily_sentiment['day'],
-            y=daily_sentiment['avg_sentiment'],
+            x=timeline_df['day'],
+            y=timeline_df['avg_sentiment'],
             name='Ortalama Duygu',
             line=dict(color='#e74c3c', width=3),
             mode='lines+markers'
         ))
 
         fig.add_trace(go.Bar(
-            x=daily_sentiment['day'],
-            y=daily_sentiment['count'],
+            x=timeline_df['day'],
+            y=timeline_df['count'],
             name='Haber Sayısı',
             yaxis='y2',
             opacity=0.3,
@@ -144,7 +173,7 @@ class DashboardUI:
 
         fig.update_layout(
             height=500,
-            title="📈 Zaman İçinde Duygu Trendi",
+            title=" Zaman İçinde Duygu Trendi",
             yaxis=dict(title='Duygu Skoru', side='left'),
             yaxis2=dict(title='Haber Sayısı', side='right', overlaying='y'),
             hovermode='x unified'
@@ -165,7 +194,7 @@ class DashboardUI:
             color_discrete_map={'Positive': '#2ecc71', 'Neutral': '#95a5a6', 'Negative': '#e74c3c'},
             labels={'sentiment': 'Duygu Skoru', 'count': 'Frekans'}
         )
-        fig.update_layout(height=400, title="📊 Sentiment Score Dağılımı")
+        fig.update_layout(height=400, title=" Sentiment Score Dağılımı")
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_box_plot(self, df: pd.DataFrame):
@@ -244,19 +273,19 @@ class DashboardUI:
         st.markdown("---")
         st.markdown(f"""
         <div style='text-align: center; color: gray;'>
-            <p>📰 News Analyzer Dashboard | Made with ❤️ using Streamlit</p>
+            <p> News Analyzer Dashboard | Made with  using Streamlit</p>
             <p>Son güncelleme: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         </div>
         """, unsafe_allow_html=True)
 
     def render_sidebar_filters(self, df: pd.DataFrame) -> Dict:
-        st.sidebar.markdown("### 🎛️ Filtreler")
+        st.sidebar.markdown("### Filtreler")
 
         filters = {}
 
         if not df.empty:
             sources = ['Tümü'] + sorted(df['source'].unique().tolist())
-            filters['source'] = st.sidebar.selectbox("📡 Kaynak", sources)
+            filters['source'] = st.sidebar.selectbox(" Kaynak", sources)
 
             if 'date' in df.columns:
                 min_date = df['date'].min().date()
@@ -264,14 +293,14 @@ class DashboardUI:
 
                 if min_date != max_date:
                     filters['date_range'] = st.sidebar.date_input(
-                        "📅 Tarih Aralığı",
+                        " Tarih Aralığı",
                         value=(min_date, max_date),
                         min_value=min_date,
                         max_value=max_date
                     )
 
             filters['sentiment'] = st.sidebar.multiselect(
-                "😊 Duygu",
+                " Duygu",
                 ['Positive', 'Neutral', 'Negative'],
                 default=['Positive', 'Neutral', 'Negative']
             )

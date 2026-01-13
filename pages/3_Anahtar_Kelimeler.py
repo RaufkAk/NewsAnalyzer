@@ -17,7 +17,7 @@ st.markdown("""
     [data-testid="stSidebar"] .stMarkdown { color: #333; }
     [data-testid="stSidebar"] > div:first-child { padding-top: 2rem; }
     [data-testid="stSidebar"] > div:first-child::before {
-        content: "📰 News Analyzer"; display: block; font-size: 1.5rem;
+        content: " News Analyzer"; display: block; font-size: 1.5rem;
         font-weight: 700; color: #667eea; text-align: center;
         padding: 1rem 0; border-bottom: 2px solid #e0e0e0;
         margin-bottom: 1.5rem; position: absolute; top: 0;
@@ -35,16 +35,16 @@ if not df.empty:
 
 st.markdown("""
     <div style='text-align: center; padding: 20px; background: rgba(102, 126, 234, 0.1); border-radius: 15px; margin-bottom: 20px; border: 2px solid rgba(102, 126, 234, 0.3);'>
-        <h1 style='margin:0; font-size: 3em; color: #667eea;'>🔑 Anahtar Kelimeler</h1>
+        <h1 style='margin:0; font-size: 3em; color: #667eea;'> Anahtar Kelimeler</h1>
         <p style='color: #555; font-size: 1.2em; margin: 10px 0 0 0;'>Trending konular ve popüler kelimeler</p>
     </div>
 """, unsafe_allow_html=True)
 
 if df.empty:
-    st.warning("⚠️ Henüz veri yok!")
+    st.warning(" Henüz veri yok!")
     st.stop()
 
-st.subheader("🔥 Trending Konular")
+st.subheader(" Trending Konular")
 trending = analyzer.get_trending_topics(df, top_n=15)
 
 col1, col2, col3 = st.columns(3)
@@ -58,7 +58,7 @@ for idx, (topic, count) in enumerate(trending):
 
 st.markdown("---")
 
-st.subheader("📊 Kaynak Bazında Anahtar Kelimeler")
+st.subheader("Kaynak Bazında Anahtar Kelimeler")
 
 sources = df['source'].unique()
 

@@ -17,26 +17,19 @@ logger = logging.getLogger(__name__)
 class NewsScraper:
     """Haber sitelerinden veri toplayan ana sınıf"""
 
-    # Her kaynak için kategoriler
-    BBC_CATEGORIES = [
-        "world", "business", "technology", "health", "science_and_environment"
-    ]
-    CNN_CATEGORIES = [
-        "world", "business", "africa", "asia", "europe", "middle-east", "us", "americas"
-    ]
-    ALJAZEERA_CATEGORIES = [
-        "news", "economy", "opinion", "human-rights", "science-and-technology"
-    ]
-    NPR_CATEGORIES = [
-        "world", "business", "science", "technology", "health"
-    ]
-
-    # Her kaynak için kategori indexi (Streamlit session_state ile tutulabilir)
-    category_indices = {
-        'bbc': 0,
-        'cnn': 0,
-        'aljazeera': 0,
-        'npr': 0
+    CATEGORIES = {
+        'bbc': [
+            "world", "business", "technology", "health", "science_and_environment"
+        ],
+        'cnn': [
+            "world", "business", "africa", "asia", "europe", "middle-east", "us", "americas"
+        ],
+        'aljazeera': [
+            "news", "economy", "opinion", "human-rights", "science-and-technology"
+        ],
+        'npr': [
+            "world", "business", "science", "technology", "health"
+        ]
     }
 
     def __init__(self, max_workers=4):
@@ -44,271 +37,183 @@ class NewsScraper:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
+        # Initialize category indices for each source
+        self.category_indices = {source: 0 for source in self.CATEGORIES}
 
-    def get_next_category(self, source):
-        # Sıradaki kategoriyi döndür ve indexi güncelle
-        if source == 'bbc':
-            idx = NewsScraper.category_indices['bbc']
-            cat = NewsScraper.BBC_CATEGORIES[idx]
-            NewsScraper.category_indices['bbc'] = (idx + 1) % len(NewsScraper.BBC_CATEGORIES)
-            return cat
-        elif source == 'cnn':
-            idx = NewsScraper.category_indices['cnn']
-            cat = NewsScraper.CNN_CATEGORIES[idx]
-            NewsScraper.category_indices['cnn'] = (idx + 1) % len(NewsScraper.CNN_CATEGORIES)
-            return cat
-        elif source == 'aljazeera':
-            idx = NewsScraper.category_indices['aljazeera']
-            cat = NewsScraper.ALJAZEERA_CATEGORIES[idx]
-            NewsScraper.category_indices['aljazeera'] = (idx + 1) % len(NewsScraper.ALJAZEERA_CATEGORIES)
-            return cat
-        elif source == 'npr':
-            idx = NewsScraper.category_indices['npr']
-            cat = NewsScraper.NPR_CATEGORIES[idx]
-            NewsScraper.category_indices['npr'] = (idx + 1) % len(NewsScraper.NPR_CATEGORIES)
-            return cat
-        return None
+    def get_next_category(self, source: str) -> str:
+        """Sıradaki kategoriyi döndür ve indexi güncelle"""
+        if source not in self.CATEGORIES:
+            return None
+            
+        cats = self.CATEGORIES[source]
+        idx = self.category_indices[source]
+        category = cats[idx]
+        self.category_indices[source] = (idx + 1) % len(cats)
+        return category
+
+    def _fetch_content(self, url: str):
+        """Generic method to fetch and parse URL content"""
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            if response.status_code != 200:
+                logger.warning(f"URL yanıt vermiyor ({response.status_code}): {url}")
+                return None
+            return BeautifulSoup(response.content, 'html.parser')
+        except Exception as e:
+            logger.error(f"Fetch hatası ({url}): {e}")
+            return None
+
+    def _create_article(self, title, url, source):
+        """Helper to create News object with sentiment"""
+        # Validate title length
+        if len(title) < 15 or len(title) > 250:
+            return None
+
+        # Calculate sentiment immediately
+        sentiment = TextBlob(title).sentiment.polarity
+        
+        # Ensure full URL
+        if url and not url.startswith('http'):
+            # Base URLs mapping
+            base_urls = {
+                'BBC News': 'https://www.bbc.com',
+                'CNN': 'https://edition.cnn.com',
+                'Al Jazeera': 'https://www.aljazeera.com',
+                'NPR': 'https://www.npr.org'
+            }
+            if source in base_urls:
+                url = base_urls[source] + url
+
+        try:
+            return News(
+                title=title,
+                url=url,
+                source=source,
+                sentiment=sentiment,
+                date=datetime.now()
+            )
+        except ValueError:
+            return None
 
     def scrape_bbc(self) -> List[News]:
         """BBC News'den kategori bazlı haber çek"""
         category = self.get_next_category('bbc')
         url = f"https://www.bbc.com/news/{category}"
+        
+        soup = self._fetch_content(url)
+        if not soup:
+            return []
+
         articles = []
         seen_titles = set()
-        try:
-            logger.info(f"BBC'den '{category}' kategorisinden haberler çekiliyor...")
-            response = requests.get(url, headers=self.headers, timeout=15)
-            if response.status_code != 200:
-                logger.warning(f"BBC yanıt vermiyor: {response.status_code}")
-                return articles
-            soup = BeautifulSoup(response.content, 'html.parser')
-            headline_tags = soup.find_all(['h2', 'h3'], limit=150)
-            for tag in headline_tags:
-                title = tag.get_text(strip=True)
-                if len(title) < 20 or len(title) > 200:
-                    continue
+        
+        logger.info(f"BBC'den '{category}' kategorisinden haberler çekiliyor...")
+        headline_tags = soup.find_all(['h2', 'h3'], limit=150)
+        
+        for tag in headline_tags:
+            title = tag.get_text(strip=True)
+            if title in seen_titles: continue
+            
+            link_tag = tag.find_parent('a')
+            if not link_tag or not link_tag.get('href'): continue
+            
+            seen_titles.add(title)
+            article = self._create_article(title, link_tag['href'], 'BBC News')
+            if article:
+                articles.append(article)
                 
-                # Duplicate kontrolü
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
-                
-                sentiment = TextBlob(title).sentiment.polarity
-                link_tag = tag.find_parent('a')
-                url_path = ''
-                if link_tag and link_tag.get('href'):
-                    href = link_tag['href']
-                    if href.startswith('http'):
-                        url_path = href
-                    elif href.startswith('/'):
-                        url_path = 'https://www.bbc.com' + href
-                try:
-                    article = News(
-                        title=title,
-                        url=url_path,
-                        source='BBC News',
-                        sentiment=sentiment,
-                        date=datetime.now()
-                    )
-                    articles.append(article)
-                except ValueError as e:
-                    logger.warning(f"BBC article validation hatası: {e}")
-                    continue
-            logger.info(f"BBC: {len(articles)} haber çekildi ({category})")
-        except Exception as e:
-            logger.error(f"BBC hatası: {e}")
+        logger.info(f"BBC: {len(articles)} haber çekildi ({category})")
         return articles
 
     def scrape_cnn(self) -> List[News]:
         """CNN'den haber çek"""
+        url = "https://edition.cnn.com/world"
+        soup = self._fetch_content(url)
+        if not soup:
+            return []
+
         articles = []
         seen_titles = set()
-        try:
-            logger.info("CNN'den haberler çekiliyor...")
-            url = "https://edition.cnn.com/world"
-            response = requests.get(url, headers=self.headers, timeout=15)
+        
+        logger.info("CNN'den haberler çekiliyor...")
+        headlines = soup.find_all('span', class_='container__headline-text')
 
-            if response.status_code != 200:
-                logger.warning(f"CNN yanıt vermiyor: {response.status_code}")
-                return articles
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-            headlines = soup.find_all('span', class_='container__headline-text')
-
-            for headline in headlines[:50]:
-                title = headline.get_text(strip=True)
-
-                if len(title) < 20:
-                    continue
+        for headline in headlines[:50]:
+            title = headline.get_text(strip=True)
+            if title in seen_titles: continue
+            
+            parent = headline.find_parent('a')
+            href = parent['href'] if parent and parent.get('href') else ''
+            
+            seen_titles.add(title)
+            article = self._create_article(title, href, 'CNN')
+            if article:
+                articles.append(article)
                 
-                # Duplicate kontrolü
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
-
-                sentiment = TextBlob(title).sentiment.polarity
-
-                parent = headline.find_parent('a')
-                url_path = ''
-                if parent and parent.get('href'):
-                    href = parent['href']
-                    if href.startswith('http'):
-                        url_path = href
-                    elif href.startswith('/'):
-                        url_path = 'https://edition.cnn.com' + href
-
-                # News dataclass oluştur
-                try:
-                    article = News(
-                        title=title,
-                        url=url_path,
-                        source='CNN',
-                        sentiment=sentiment,
-                        date=datetime.now()
-                    )
-                    articles.append(article)
-                except ValueError as e:
-                    logger.warning(f"CNN article validation hatası: {e}")
-                    continue
-
-            logger.info(f"CNN: {len(articles)} haber çekildi")
-
-        except Exception as e:
-            logger.error(f"CNN hatası: {e}")
-
+        logger.info(f"CNN: {len(articles)} haber çekildi")
         return articles
 
     def scrape_aljazeera(self) -> List[News]:
         """Al Jazeera'dan haber çek"""
+        url = "https://www.aljazeera.com/"
+        soup = self._fetch_content(url)
+        if not soup:
+            return []
+
         articles = []
         seen_titles = set()
-        try:
-            logger.info("Al Jazeera'dan haberler çekiliyor...")
-            url = "https://www.aljazeera.com/"
-            response = requests.get(url, headers=self.headers, timeout=15)
+        
+        logger.info("Al Jazeera'dan haberler çekiliyor...")
+        all_links = soup.find_all('a', href=True)
 
-            if response.status_code != 200:
-                logger.warning(f"Al Jazeera yanıt vermiyor: {response.status_code}")
-                return articles
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-            all_links = soup.find_all('a', href=True)
-
-            for link in all_links:
-                title = link.get_text(strip=True)
-
-                if len(title) < 20 or len(title) > 200:
-                    continue
-
-                # Navigation filtrele
-                if any(skip in title.lower() for skip in ['skip to', 'home page', 'search', 'menu']):
-                    continue
+        for link in all_links:
+            title = link.get_text(strip=True)
+            
+            if any(skip in title.lower() for skip in ['skip to', 'home page', 'search', 'menu']):
+                continue
                 
-                # Duplicate kontrolü
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
+            if title in seen_titles: continue
+            seen_titles.add(title)
 
-                sentiment = TextBlob(title).sentiment.polarity
+            article = self._create_article(title, link.get('href'), 'Al Jazeera')
+            if article:
+                articles.append(article)
 
-                url_path = link.get('href', '')
-                if url_path and not url_path.startswith('http'):
-                    url_path = 'https://www.aljazeera.com' + url_path
+            if len(articles) >= 25:
+                break
 
-                # News data class oluştur
-                try:
-                    article = News(
-                        title=title,
-                        url=url_path,
-                        source='Al Jazeera',
-                        sentiment=sentiment,
-                        date=datetime.now()
-                    )
-                    articles.append(article)
-                except ValueError as e:
-                    logger.warning(f"Al Jazeera article validation hatası: {e}")
-                    continue
-
-                if len(articles) >= 25:
-                    break
-
-            logger.info(f"Al Jazeera: {len(articles)} haber çekildi")
-
-        except Exception as e:
-            logger.error(f"Al Jazeera hatası: {e}")
-
+        logger.info(f"Al Jazeera: {len(articles)} haber çekildi")
         return articles
 
     def scrape_npr(self) -> List[News]:
         """NPR'den haber çek"""
+        url = "https://www.npr.org/sections/news/"
+        soup = self._fetch_content(url)
+        if not soup:
+            return []
+
         articles = []
         seen_titles = set()
-        try:
-            logger.info("NPR'den haberler çekiliyor...")
-            url = "https://www.npr.org/sections/news/"
-            response = requests.get(url, headers=self.headers, timeout=15)
+        
+        logger.info("NPR'den haberler çekiliyor...")
+        
+        headlines = soup.find_all('h2', class_='title') or \
+                    soup.find_all('h3', class_='title') or \
+                    soup.find_all('h2', limit=50)
 
-            if response.status_code != 200:
-                logger.warning(f"NPR yanıt vermiyor: {response.status_code}")
-                return articles
-
-            soup = BeautifulSoup(response.content, 'html.parser')
+        for item in headlines[:50]:
+            title = item.get_text(strip=True)
+            if title in seen_titles: continue
             
-            # NPR'ın yeni yapısına göre başlıkları bul
-            headlines = soup.find_all('h2', class_='title')
+            link = item.find_parent('a') or item.find('a')
+            href = link.get('href', '') if link else ''
             
-            if not headlines:
-                # Alternatif selectors
-                headlines = soup.find_all('h3', class_='title')
-            
-            if not headlines:
-                # Tüm h2'leri dene
-                headlines = soup.find_all('h2', limit=50)
+            seen_titles.add(title)
+            article = self._create_article(title, href, 'NPR')
+            if article:
+                articles.append(article)
 
-            for item in headlines[:50]:
-                try:
-                    title = item.get_text(strip=True)
-                    
-                    # Parent link'i bul
-                    link = item.find_parent('a') or item.find('a')
-                    url_path = link.get('href', '') if link else ''
-
-                    if len(title) < 15 or len(title) > 250:
-                        continue
-                    
-                    # Duplicate kontrolü
-                    if title in seen_titles:
-                        continue
-                    seen_titles.add(title)
-
-                    sentiment = TextBlob(title).sentiment.polarity
-
-                    if url_path and not url_path.startswith('http'):
-                        url_path = 'https://www.npr.org' + url_path
-
-                    # News data class oluştur
-                    try:
-                        article = News(
-                            title=title,
-                            url=url_path,
-                            source='NPR',
-                            sentiment=sentiment,
-                            date=datetime.now()
-                        )
-                        articles.append(article)
-                    except ValueError as e:
-                        logger.warning(f"NPR article validation hatası: {e}")
-                        continue
-
-                except Exception as item_error:
-                    logger.warning(f"NPR item parse hatası: {item_error}")
-                    continue
-
-            logger.info(f"NPR: {len(articles)} haber çekildi")
-
-        except Exception as e:
-            logger.error(f"NPR hatası: {e}")
-
+        logger.info(f"NPR: {len(articles)} haber çekildi")
         return articles
 
     def scrape_all(self, db_manager=None) -> List[News]:
@@ -317,7 +222,7 @@ class NewsScraper:
         Threading kullanarak performansı artırır
         
         Args:
-            db_manager: Database manager instance (duplicate kontrolü için)
+            db_manager: Database manager instance
 
         Returns:
             List[News]: Toplanan tüm haberler (News nesneleri)
@@ -348,7 +253,7 @@ class NewsScraper:
                 except Exception as e:
                     logger.error(f"Thread hatası: {e}")
 
-        # Bugün database'de olan başlıkları al (duplicate kontrolü için)
+        # Bugün database'de olan başlıkları al
         existing_titles = set()
         if db_manager:
             try:
@@ -365,7 +270,7 @@ class NewsScraper:
             except Exception as e:
                 logger.warning(f"Database kontrolü yapılamadı: {e}")
 
-        # Her kaynaktan yeni (duplicate olmayan) haberleri filtrele
+        # Her kaynaktan yeni  haberleri filtrele
         filtered_by_source = []
         for source_articles in all_articles_by_source:
             new_articles = [
@@ -379,6 +284,7 @@ class NewsScraper:
                 # Hiç yeni haber yoksa, orijinalden en az 1 tane al
                 filtered_by_source.append(source_articles[:1])
                 logger.info(f"{source_articles[0].source}: Yeni haber yok, 1 tane alındı")
+                
 
         # Önce her kaynaktan en az 1 haber garantisi
         selected_articles: List[News] = []

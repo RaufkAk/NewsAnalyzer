@@ -47,7 +47,7 @@ st.markdown("""
   [data-testid="stSidebar"] .stMarkdown { color: #333; }
   [data-testid="stSidebar"] > div:first-child { padding-top: 2rem; }
   [data-testid="stSidebar"] > div:first-child::before {
-    content: "📰 News Analyzer"; display: block; font-size: 1.5rem;
+    content: " News Analyzer"; display: block; font-size: 1.5rem;
     font-weight: 700; color: #667eea; text-align: center;
     padding: 1rem 0; border-bottom: 2px solid #e0e0e0;
     margin-bottom: 1.5rem; position: absolute; top: 0;
@@ -75,25 +75,25 @@ def init_components():
 
 scraper, db, analyzer, ui = init_components()
 
-st.sidebar.markdown("### 🔄 Veri Toplama")
+st.sidebar.markdown("###  Veri Toplama")
 
-if st.sidebar.button("🚀 YENİ HABERLER ÇEK", use_container_width=True, type="primary"):
+if st.sidebar.button(" YENİ HABERLER ÇEK", use_container_width=True, type="primary"):
     with st.spinner("Haberler çekiliyor..."):
         articles = scraper.scrape_all(db_manager=db)
         result = db.dbInsertArticlesBulk(articles)
 
         st.sidebar.success(f"""
-        ✅ **Tamamlandı!**
-        - 🔍 Çekilen: {len(articles)} haber
-        - ✅ YENİ: {result['saved']} haber
-        - 🔄 Duplicate: {result.get('duplicate', 0)} haber
-        - ❌ Başarısız: {result.get('failed', 0)}
+         **Tamamlandı!**
+        -  Çekilen: {len(articles)} haber
+        -  YENİ: {result['saved']} haber
+        -  Duplicate: {result.get('duplicate', 0)} haber
+        -  Başarısız: {result.get('failed', 0)}
         """)
 
         time.sleep(2)
         st.rerun()
 
-if st.sidebar.button("🧪 Test Verisi Ekle", use_container_width=True):
+if st.sidebar.button(" Test Verisi Ekle", use_container_width=True):
     test_articles = [
         {
             'title': 'Breaking: Global Market Surge',
@@ -119,14 +119,14 @@ if st.sidebar.button("🧪 Test Verisi Ekle", use_container_width=True):
     ]
 
     result = db.dbInsertArticlesBulk(test_articles)
-    st.sidebar.success(f"✅ {result['saved']} test verisi eklendi!")
+    st.sidebar.success(f" {result['saved']} test verisi eklendi!")
     time.sleep(1)
     st.rerun()
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🗑️ VERİTABANINI TEMİZLE", use_container_width=True, type="secondary"):
+if st.sidebar.button(" VERİTABANINI TEMİZLE", use_container_width=True, type="secondary"):
     db.dbDeleteAllArticles()
-    st.sidebar.success("✅ Tüm veriler silindi!")
+    st.sidebar.success(" Tüm veriler silindi!")
     time.sleep(1)
     st.rerun()
 
@@ -142,38 +142,46 @@ df_filtered = ui.apply_filters(df.copy(), filters) if not df.empty else df
 
 st.markdown("""
     <div style='text-align: center; padding: 24px; background: white; border-radius: 15px; margin-bottom: 24px; box-shadow: 0 6px 12px rgba(0,0,0,0.15);'>
-        <h1 style='margin:0; font-size: 2.2em; color: #333; font-weight: 700; line-height: 1.2;'>📊 News Sentiment Analyzer</h1>
+        <h1 style='margin:0; font-size: 2.2em; color: #333; font-weight: 700; line-height: 1.2;'> News Sentiment Analyzer</h1>
     </div>
 """, unsafe_allow_html=True)
 
 if df_filtered.empty:
-    st.warning("⚠️ **Henüz veri yok!**")
+    st.warning("⚠ **Henüz veri yok!**")
     st.info("""
     **Başlamak için:**
-    1. Sol menüden **'🚀 YENİ HABERLER ÇEK'** butonuna tıklayın (20-30 sn sürer)
-    2. Veya **'🧪 Test Verisi Ekle'** ile demo verisi ekleyin
+    1. Sol menüden **' YENİ HABERLER ÇEK'** butonuna tıklayın (20-30 sn sürer)
+    2. Veya **' Test Verisi Ekle'** ile demo verisi ekleyin
     """)
     st.stop()
 
-ui.render_metrics(df_filtered)
+# Calculate stats for metrics
+stats = analyzer.get_summary_statistics(df_filtered)
+recent_count = analyzer.get_recent_article_count(df_filtered)
+ui.render_metrics(stats, recent_count)
 
 st.markdown("---")
 
-st.subheader("📊 Hızlı Bakış")
-st.info("👈 **Sol menüden farklı sayfaları keşfedin!** Genel Bakış, Trend Analizi, Detay Analiz, Anahtar Kelimeler ve Haberler...")
+st.subheader(" Hızlı Bakış")
+st.info(" **Sol menüden farklı sayfaları keşfedin!** Genel Bakış, Trend Analizi, Detay Analiz, Anahtar Kelimeler ve Haberler...")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 🎭 Duygu Dağılımı")
-    ui.plot_sentiment_pie(df_filtered)
+    st.markdown("###  Duygu Dağılımı")
+    # UI now expects a dictionary distribution
+    dist = analyzer.get_sentiment_distribution(df_filtered)
+    ui.plot_sentiment_pie(dist)
 
 with col2:
-    st.markdown("### 📡 Kaynak Dağılımı")
-    ui.plot_source_distribution(df_filtered)
+    st.markdown("###  Kaynak Dağılımı")
+    # UI now expects specific DF from sentiment_by_source
+    source_stats = analyzer.sentiment_by_source(df_filtered)
+    ui.plot_source_distribution(source_stats)
 
 st.markdown("---")
-st.subheader("📈 Son Trendler")
-ui.plot_sentiment_timeline(df_filtered)
+st.subheader(" Son Trendler")
+timeline_df = analyzer.sentiment_over_time(df_filtered)
+ui.plot_sentiment_timeline(timeline_df)
 
 ui.render_footer()
